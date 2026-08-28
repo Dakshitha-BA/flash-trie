@@ -1,5 +1,40 @@
 ### COPYING
 
+---
+
+#### FlashTrie (MIT License)
+
+The FlashTrie to marisa-trie — including GPU-accelerated beam search, CUDA kernels, and related additions — are released under the MIT License.
+
+Copyright (c) 2026 Microsoft Corporation
+
+Contributors: Dakshitha B Anandakumar (Microsoft), Anurag Mukkara (NVIDIA)
+
+New files contributed by FlashTrie:
+- `include/marisa/tbs_input.h`
+- `lib/marisa/grimoire/cuda_allocator.h`
+- `lib/marisa/grimoire/cuda_check.h`
+- `lib/marisa/grimoire/trie/beam-search-state.h`
+- `lib/marisa/grimoire/trie/beam-state.h`
+- `lib/marisa/grimoire/trie/candidates.h`
+- `lib/marisa/grimoire/trie/candidates-gpu.h`
+- `lib/marisa/grimoire/trie/tbs-kernels.cu`
+- `tools/beam-search-helper.h`
+- `tools/marisa-beam-search.cc`
+- `tools/bindings.cpp`
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+---
+
+#### Original marisa-trie License
+
+This repository is based on [marisa-trie](https://github.com/s-yata/marisa-trie) by Susumu Yata. The original marisa-trie code is licensed under BSD-2-Clause OR LGPL-2.1-or-later.
+
 libmarisa and its command line tools are licensed under BSD-2-Clause OR LGPL-2.1-or-later.
 
 #### The BSD 2-clause license

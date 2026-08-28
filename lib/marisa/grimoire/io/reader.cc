@@ -1,27 +1,30 @@
+#include <stdio.h>
+
 #ifdef _WIN32
  #include <io.h>
 #else  // _WIN32
  #include <unistd.h>
 #endif  // _WIN32
 
-#include <cerrno>
 #include <limits>
-#include <stdexcept>
 
 #include "marisa/grimoire/io/reader.h"
 
-namespace marisa::grimoire::io {
+namespace marisa {
+namespace grimoire {
+namespace io {
 
-Reader::Reader() = default;
+Reader::Reader()
+    : file_(NULL), fd_(-1), stream_(NULL), needs_fclose_(false) {}
 
 Reader::~Reader() {
   if (needs_fclose_) {
-    std::fclose(file_);
+    ::fclose(file_);
   }
 }
 
 void Reader::open(const char *filename) {
-  MARISA_THROW_IF(filename == nullptr, std::invalid_argument);
+  MARISA_THROW_IF(filename == NULL, MARISA_NULL_ERROR);
 
   Reader temp;
   temp.open_(filename);
@@ -29,7 +32,7 @@ void Reader::open(const char *filename) {
 }
 
 void Reader::open(std::FILE *file) {
-  MARISA_THROW_IF(file == nullptr, std::invalid_argument);
+  MARISA_THROW_IF(file == NULL, MARISA_NULL_ERROR);
 
   Reader temp;
   temp.open_(file);
@@ -37,7 +40,7 @@ void Reader::open(std::FILE *file) {
 }
 
 void Reader::open(int fd) {
-  MARISA_THROW_IF(fd == -1, std::invalid_argument);
+  MARISA_THROW_IF(fd == -1, MARISA_CODE_ERROR);
 
   Reader temp;
   temp.open_(fd);
@@ -50,23 +53,22 @@ void Reader::open(std::istream &stream) {
   swap(temp);
 }
 
-void Reader::clear() noexcept {
+void Reader::clear() {
   Reader().swap(*this);
 }
 
-void Reader::swap(Reader &rhs) noexcept {
-  std::swap(file_, rhs.file_);
-  std::swap(fd_, rhs.fd_);
-  std::swap(stream_, rhs.stream_);
-  std::swap(needs_fclose_, rhs.needs_fclose_);
+void Reader::swap(Reader &rhs) {
+  marisa::swap(file_, rhs.file_);
+  marisa::swap(fd_, rhs.fd_);
+  marisa::swap(stream_, rhs.stream_);
+  marisa::swap(needs_fclose_, rhs.needs_fclose_);
 }
 
 void Reader::seek(std::size_t size) {
-  MARISA_THROW_IF(!is_open(), std::logic_error);
+  MARISA_THROW_IF(!is_open(), MARISA_STATE_ERROR);
   if (size == 0) {
     return;
-  }
-  if (size <= 16) {
+  } else if (size <= 16) {
     char buf[16];
     read_data(buf, size);
   } else {
@@ -80,19 +82,16 @@ void Reader::seek(std::size_t size) {
 }
 
 bool Reader::is_open() const {
-  return (file_ != nullptr) || (fd_ != -1) || (stream_ != nullptr);
+  return (file_ != NULL) || (fd_ != -1) || (stream_ != NULL);
 }
 
 void Reader::open_(const char *filename) {
-  std::FILE *file = nullptr;
+  std::FILE *file = NULL;
 #ifdef _MSC_VER
-  const errno_t error_value = ::fopen_s(&file, filename, "rb");
-  MARISA_THROW_SYSTEM_ERROR_IF(error_value != 0, error_value,
-                               std::generic_category(), "fopen_s");
-#else   // _MSC_VER
-  file = std::fopen(filename, "rb");
-  MARISA_THROW_SYSTEM_ERROR_IF(file == nullptr, errno, std::generic_category(),
-                               "std::fopen");
+  MARISA_THROW_IF(::fopen_s(&file, filename, "rb") != 0, MARISA_IO_ERROR);
+#else  // _MSC_VER
+  file = ::fopen(filename, "rb");
+  MARISA_THROW_IF(file == NULL, MARISA_IO_ERROR);
 #endif  // _MSC_VER
   file_ = file;
   needs_fclose_ = true;
@@ -111,36 +110,38 @@ void Reader::open_(std::istream &stream) {
 }
 
 void Reader::read_data(void *buf, std::size_t size) {
-  MARISA_THROW_IF(!is_open(), std::logic_error);
+  MARISA_THROW_IF(!is_open(), MARISA_STATE_ERROR);
   if (size == 0) {
     return;
-  }
-  if (fd_ != -1) {
+  } else if (fd_ != -1) {
     while (size != 0) {
 #ifdef _WIN32
-      constexpr std::size_t CHUNK_SIZE = std::numeric_limits<int>::max();
+      static const std::size_t CHUNK_SIZE =
+          std::numeric_limits<int>::max();
       const unsigned int count = (size < CHUNK_SIZE) ? size : CHUNK_SIZE;
       const int size_read = ::_read(fd_, buf, count);
-      MARISA_THROW_SYSTEM_ERROR_IF(size_read <= 0, errno,
-                                   std::generic_category(), "_read");
-#else   // _WIN32
-      constexpr std::size_t CHUNK_SIZE = std::numeric_limits< ::ssize_t>::max();
+#else  // _WIN32
+      static const std::size_t CHUNK_SIZE =
+          std::numeric_limits< ::ssize_t>::max();
       const ::size_t count = (size < CHUNK_SIZE) ? size : CHUNK_SIZE;
       const ::ssize_t size_read = ::read(fd_, buf, count);
-      MARISA_THROW_SYSTEM_ERROR_IF(size_read <= 0, errno,
-                                   std::generic_category(), "read");
 #endif  // _WIN32
+      MARISA_THROW_IF(size_read <= 0, MARISA_IO_ERROR);
       buf = static_cast<char *>(buf) + size_read;
       size -= static_cast<std::size_t>(size_read);
     }
-  } else if (file_ != nullptr) {
-    MARISA_THROW_SYSTEM_ERROR_IF(std::fread(buf, 1, size, file_) != size, errno,
-                                 std::generic_category(), "std::fread");
-  } else if (stream_ != nullptr) {
-    MARISA_THROW_IF(!stream_->read(static_cast<char *>(buf),
-                                   static_cast<std::streamsize>(size)),
-                    std::runtime_error);
+  } else if (file_ != NULL) {
+    MARISA_THROW_IF(::fread(buf, 1, size, file_) != size, MARISA_IO_ERROR);
+  } else if (stream_ != NULL) {
+    try {
+      MARISA_THROW_IF(!stream_->read(static_cast<char *>(buf),
+          static_cast<std::streamsize>(size)), MARISA_IO_ERROR);
+    } catch (const std::ios_base::failure &) {
+      MARISA_THROW(MARISA_IO_ERROR, "std::ios_base::failure");
+    }
   }
 }
 
-}  // namespace marisa::grimoire::io
+}  // namespace io
+}  // namespace grimoire
+}  // namespace marisa

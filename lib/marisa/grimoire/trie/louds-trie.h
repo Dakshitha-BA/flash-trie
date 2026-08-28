@@ -1,25 +1,27 @@
 #ifndef MARISA_GRIMOIRE_TRIE_LOUDS_TRIE_H_
 #define MARISA_GRIMOIRE_TRIE_LOUDS_TRIE_H_
 
-#include <memory>
-
 #include "marisa/agent.h"
+#include "marisa/grimoire/cuda_allocator.h"
+#include "marisa/grimoire/trie/beam-search-state.h"
+#include "marisa/grimoire/trie/beam-state.h"
 #include "marisa/grimoire/trie/cache.h"
+#include "marisa/grimoire/trie/candidates.h"
 #include "marisa/grimoire/trie/config.h"
 #include "marisa/grimoire/trie/key.h"
 #include "marisa/grimoire/trie/tail.h"
 #include "marisa/grimoire/vector.h"
 #include "marisa/keyset.h"
+#include "marisa/tbs_input.h"
 
-namespace marisa::grimoire::trie {
+namespace marisa {
+namespace grimoire {
+namespace trie {
 
-class LoudsTrie {
+class LoudsTrie  {
  public:
   LoudsTrie();
   ~LoudsTrie();
-
-  LoudsTrie(const LoudsTrie &) = delete;
-  LoudsTrie &operator=(const LoudsTrie &) = delete;
 
   void build(Keyset &keyset, int flags);
 
@@ -31,6 +33,18 @@ class LoudsTrie {
   void reverse_lookup(Agent &agent) const;
   bool common_prefix_search(Agent &agent) const;
   bool predictive_search(Agent &agent) const;
+
+  void tbs(TbsInput &input) const;
+  static constexpr size_t kMaxBatchSizeLimit = 32;
+  void init_tbs_gpu(size_t max_batch_size, size_t max_num_topk,
+      size_t max_num_outpos, size_t max_num_out_beams,
+      size_t max_num_out_tokens, size_t max_num_inter_beams,
+      size_t radix_topk_threshold);
+  void tbs_gpu(TbsInput &input, size_t batch_id) const;
+  void tbs_gpu_batched(std::vector<TbsInput> &inputs) const;
+  size_t max_batch_size() const {
+    return max_batch_size_;
+  }
 
   std::size_t num_tries() const {
     return config_.num_tries();
@@ -61,42 +75,64 @@ class LoudsTrie {
   std::size_t total_size() const;
   std::size_t io_size() const;
 
-  void clear() noexcept;
-  void swap(LoudsTrie &rhs) noexcept;
+  void clear();
+  void swap(LoudsTrie &rhs);
+  void prefetch() const;
+
+  bool predictive_find_child(Agent &agent) const;
+
+  __host__ __device__ bool is_terminal(std::size_t i) const {
+    return terminal_flags_[i];
+  }
+
+  __device__ void extend_beam_binary_child_search(
+      const BeamState &parent, const BeamSearchArgs &args) const;
+
+  __device__ void extend_beam_in_link(
+      const BeamState &parent, const BeamSearchArgs &args) const;
 
  private:
   BitVector louds_;
   BitVector terminal_flags_;
   BitVector link_flags_;
-  Vector<uint8_t> bases_;
+  Vector<Base> bases_;
   FlatVector extras_;
+  FlatVector link_extras_;
   Tail tail_;
-  std::unique_ptr<LoudsTrie> next_trie_;
+  scoped_ptr<LoudsTrie> next_trie_;
   Vector<Cache> cache_;
-  std::size_t cache_mask_ = 0;
-  std::size_t num_l1_nodes_ = 0;
+  std::size_t cache_mask_;
+  std::size_t num_l1_nodes_;
   Config config_;
   Mapper mapper_;
+
+  size_t max_batch_size_ = 4;
+  mutable std::vector<BeamSearchState> bs_state_;
+
+  void tbs_gpu_launch_async(TbsInput &input, size_t batch_id) const;
 
   void build_(Keyset &keyset, const Config &config);
 
   template <typename T>
-  void build_trie(Vector<T> &keys, Vector<uint32_t> *terminals,
-                  const Config &config, std::size_t trie_id);
+  void build_trie(Vector<T> &keys,
+      Vector<UInt32> *terminals, const Config &config, std::size_t trie_id);
   template <typename T>
-  void build_current_trie(Vector<T> &keys, Vector<uint32_t> *terminals,
-                          const Config &config, std::size_t trie_id);
+  void build_current_trie(Vector<T> &keys,
+      Vector<UInt32> *terminals, Vector<UInt32>& extras_vec,
+      const Config &config, std::size_t trie_id);
   template <typename T>
-  void build_next_trie(Vector<T> &keys, Vector<uint32_t> *terminals,
-                       const Config &config, std::size_t trie_id);
+  void build_next_trie(Vector<T> &keys,
+      Vector<UInt32> *terminals, const Config &config, std::size_t trie_id);
   template <typename T>
   void build_terminals(const Vector<T> &keys,
-                       Vector<uint32_t> *terminals) const;
+      Vector<UInt32> *terminals) const;
+  void reset_next_trie();
 
   void reserve_cache(const Config &config, std::size_t trie_id,
-                     std::size_t num_keys);
+      std::size_t num_keys);
   template <typename T>
-  void cache(std::size_t parent, std::size_t child, float weight, char label);
+  void cache(std::size_t parent, std::size_t child,
+      float weight, Label label);
   void fill_cache();
 
   void map_(Mapper &mapper);
@@ -104,26 +140,38 @@ class LoudsTrie {
   void write_(Writer &writer) const;
 
   inline bool find_child(Agent &agent) const;
-  inline bool predictive_find_child(Agent &agent) const;
 
-  inline void restore(Agent &agent, std::size_t node_id) const;
+  inline __host__ __device__ void restore(Agent &agent, std::size_t node_id) const;
   inline bool match(Agent &agent, std::size_t node_id) const;
-  inline bool prefix_match(Agent &agent, std::size_t node_id) const;
+  inline __host__ __device__ bool prefix_match(Agent &agent, std::size_t node_id) const;
 
-  void restore_(Agent &agent, std::size_t node_id) const;
+  __host__ __device__ void restore_(Agent &agent, std::size_t node_id) const;
   bool match_(Agent &agent, std::size_t node_id) const;
-  bool prefix_match_(Agent &agent, std::size_t node_id) const;
+  __host__ __device__ bool prefix_match_(Agent &agent, std::size_t node_id) const;
 
-  inline std::size_t get_cache_id(std::size_t node_id, char label) const;
-  inline std::size_t get_cache_id(std::size_t node_id) const;
+  inline std::size_t __host__ get_cache_id(std::size_t node_id, Label label) const;
+  inline std::size_t __host__ __device__ get_cache_id(std::size_t node_id) const;
 
-  inline std::size_t get_link(std::size_t node_id) const;
-  inline std::size_t get_link(std::size_t node_id, std::size_t link_id) const;
+  inline __host__ __device__ std::size_t get_link(std::size_t node_id) const;
+  inline __host__ __device__ std::size_t get_link(std::size_t node_id,
+      std::size_t link_id) const;
 
-  inline std::size_t update_link_id(std::size_t link_id,
-                                    std::size_t node_id) const;
+  inline __host__ __device__ std::size_t update_link_id(std::size_t link_id,
+      std::size_t node_id) const;
+
+  inline __host__ __device__ Label get_label(std::size_t node_id) const;
+  inline __host__ __device__ UInt32 split_label(Label label, Base &base) const;
+
+  // Disallows copy and assignment.
+  LoudsTrie(const LoudsTrie &);
+  LoudsTrie &operator=(const LoudsTrie &);
+
+  static constexpr UInt32 base_bits = sizeof(Base) * 8;
+  static constexpr UInt32 base_mask = (1u << base_bits) - 1;
 };
 
-}  // namespace marisa::grimoire::trie
+}  // namespace trie
+}  // namespace grimoire
+}  // namespace marisa
 
 #endif  // MARISA_GRIMOIRE_TRIE_LOUDS_TRIE_H_

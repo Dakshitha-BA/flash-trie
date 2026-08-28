@@ -1,17 +1,18 @@
 #ifndef MARISA_TRIE_H_
 #define MARISA_TRIE_H_
 
-#include <memory>
-
-#include "marisa/agent.h"   // IWYU pragma: export
-#include "marisa/keyset.h"  // IWYU pragma: export
+#include "marisa/agent.h"
+#include "marisa/keyset.h"
+#include "marisa/tbs_input.h"
 
 namespace marisa {
-namespace grimoire::trie {
+namespace grimoire {
+namespace trie {
 
 class LoudsTrie;
 
-}  // namespace grimoire::trie
+}  // namespace trie
+}  // namespace grimoire
 
 class Trie {
   friend class TrieIO;
@@ -20,15 +21,9 @@ class Trie {
   Trie();
   ~Trie();
 
-  Trie(const Trie &) = delete;
-  Trie &operator=(const Trie &) = delete;
-
-  Trie(Trie &&) noexcept;
-  Trie &operator=(Trie &&) noexcept;
-
   void build(Keyset &keyset, int config_flags = 0);
 
-  void mmap(const char *filename, int flags = 0);
+  void mmap(const char *filename);
   void map(const void *ptr, std::size_t size);
 
   void load(const char *filename);
@@ -42,6 +37,16 @@ class Trie {
   bool common_prefix_search(Agent &agent) const;
   bool predictive_search(Agent &agent) const;
 
+  void init_tbs_gpu(size_t max_batch_size, size_t max_num_topk = 1024,
+      size_t max_num_outpos = 64, size_t max_num_out_beams = 8192,
+      size_t max_num_out_tokens = 8192 * 64,
+      size_t max_num_inter_beams = 1024 * 1024,
+      size_t radix_topk_threshold = 1024);
+  size_t get_max_batch_size() const;
+  void tbs(marisa::TbsInput &input) const;
+  void tbs_gpu(marisa::TbsInput &input, size_t batch_id = 0) const;
+  void tbs_gpu_batched(std::vector<TbsInput> &inputs) const;
+
   std::size_t num_tries() const;
   std::size_t num_keys() const;
   std::size_t num_nodes() const;
@@ -54,11 +59,15 @@ class Trie {
   std::size_t total_size() const;
   std::size_t io_size() const;
 
-  void clear() noexcept;
-  void swap(Trie &rhs) noexcept;
+  void clear();
+  void swap(Trie &rhs);
 
  private:
-  std::unique_ptr<grimoire::trie::LoudsTrie> trie_;
+  scoped_ptr<grimoire::trie::LoudsTrie> trie_;
+
+  // Disallows copy and assignment.
+  Trie(const Trie &);
+  Trie &operator=(const Trie &);
 };
 
 }  // namespace marisa

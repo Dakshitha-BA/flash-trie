@@ -1,8 +1,7 @@
-#include <marisa.h>
-
-#include <exception>
 #include <iostream>
 #include <string>
+
+#include <marisa.h>
 
 #include "cmdopt.h"
 
@@ -11,24 +10,22 @@ namespace {
 bool mmap_flag = true;
 
 void print_help(const char *cmd) {
-  std::cerr
-      << "Usage: " << cmd
-      << " [OPTION]... DIC\n\n"
-         "Options:\n"
-         "  -m, --mmap-dictionary  use memory-mapped I/O to load a dictionary"
-         " (default)\n"
-         "  -r, --read-dictionary  read an entire dictionary into memory\n"
-         "  -h, --help             print this help\n"
-         "\n";
+  std::cerr << "Usage: " << cmd << " [OPTION]... DIC\n\n"
+      "Options:\n"
+      "  -m, --mmap-dictionary  use memory-mapped I/O to load a dictionary"
+      " (default)\n"
+      "  -r, --read-dictionary  read an entire dictionary into memory\n"
+      "  -h, --help             print this help\n"
+      << std::endl;
 }
 
-int lookup(const char *const *args, std::size_t num_args) {
+int lookup(const char * const *args, std::size_t num_args) {
   if (num_args == 0) {
-    std::cerr << "error: dictionary is not specified\n";
+    std::cerr << "error: dictionary is not specified" << std::endl;
     return 10;
-  }
-  if (num_args > 1) {
-    std::cerr << "error: more than one dictionaries are specified\n";
+  } else if (num_args > 1) {
+    std::cerr << "error: more than one dictionaries are specified"
+        << std::endl;
     return 11;
   }
 
@@ -36,17 +33,17 @@ int lookup(const char *const *args, std::size_t num_args) {
   if (mmap_flag) {
     try {
       trie.mmap(args[0]);
-    } catch (const std::exception &ex) {
-      std::cerr << ex.what()
-                << ": failed to mmap a dictionary file: " << args[0] << "\n";
+    } catch (const marisa::Exception &ex) {
+      std::cerr << ex.what() << ": failed to mmap a dictionary file: "
+          << args[0] << std::endl;
       return 20;
     }
   } else {
     try {
       trie.load(args[0]);
-    } catch (const std::exception &ex) {
-      std::cerr << ex.what()
-                << ": failed to load a dictionary file: " << args[0] << "\n";
+    } catch (const marisa::Exception &ex) {
+      std::cerr << ex.what() << ": failed to load a dictionary file: "
+          << args[0] << std::endl;
       return 21;
     }
   }
@@ -55,19 +52,21 @@ int lookup(const char *const *args, std::size_t num_args) {
   std::string str;
   while (std::getline(std::cin, str)) {
     try {
-      agent.set_query(str.c_str(), str.length());
+      auto labels = marisa::Key::split_str(str);
+      agent.set_query(labels.data(), labels.size());
       if (trie.lookup(agent)) {
         std::cout << agent.key().id() << '\t' << str << '\n';
       } else {
         std::cout << "-1\t" << str << '\n';
       }
-    } catch (const std::exception &ex) {
-      std::cerr << ex.what() << ": lookup() failed: " << str << "\n";
+    } catch (const marisa::Exception &ex) {
+      std::cerr << ex.what() << ": lookup() failed: " << str << std::endl;
       return 30;
     }
 
     if (!std::cout) {
-      std::cerr << "error: failed to write results to standard output\n";
+      std::cerr << "error: failed to write results to standard output"
+          << std::endl;
       return 30;
     }
   }
@@ -80,10 +79,12 @@ int lookup(const char *const *args, std::size_t num_args) {
 int main(int argc, char *argv[]) {
   std::ios::sync_with_stdio(false);
 
-  ::cmdopt_option long_options[] = {{"mmap-dictionary", 0, nullptr, 'm'},
-                                    {"read-dictionary", 0, nullptr, 'r'},
-                                    {"help", 0, nullptr, 'h'},
-                                    {nullptr, 0, nullptr, 0}};
+  ::cmdopt_option long_options[] = {
+    { "mmap-dictionary", 0, NULL, 'm' },
+    { "read-dictionary", 0, NULL, 'r' },
+    { "help", 0, NULL, 'h' },
+    { NULL, 0, NULL, 0 }
+  };
   ::cmdopt_t cmdopt;
   ::cmdopt_init(&cmdopt, argc, argv, "mrh", long_options);
   int label;
@@ -107,5 +108,5 @@ int main(int argc, char *argv[]) {
     }
   }
   return lookup(cmdopt.argv + cmdopt.optind,
-                static_cast<std::size_t>(cmdopt.argc - cmdopt.optind));
+      static_cast<std::size_t>(cmdopt.argc - cmdopt.optind));
 }

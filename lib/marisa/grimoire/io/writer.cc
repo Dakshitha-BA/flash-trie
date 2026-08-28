@@ -1,27 +1,30 @@
+#include <stdio.h>
+
 #ifdef _WIN32
  #include <io.h>
 #else  // _WIN32
  #include <unistd.h>
 #endif  // _WIN32
 
-#include <cerrno>
 #include <limits>
-#include <stdexcept>
 
 #include "marisa/grimoire/io/writer.h"
 
-namespace marisa::grimoire::io {
+namespace marisa {
+namespace grimoire {
+namespace io {
 
-Writer::Writer() = default;
+Writer::Writer()
+    : file_(NULL), fd_(-1), stream_(NULL), needs_fclose_(false) {}
 
 Writer::~Writer() {
   if (needs_fclose_) {
-    std::fclose(file_);
+    ::fclose(file_);
   }
 }
 
 void Writer::open(const char *filename) {
-  MARISA_THROW_IF(filename == nullptr, std::invalid_argument);
+  MARISA_THROW_IF(filename == NULL, MARISA_NULL_ERROR);
 
   Writer temp;
   temp.open_(filename);
@@ -29,7 +32,7 @@ void Writer::open(const char *filename) {
 }
 
 void Writer::open(std::FILE *file) {
-  MARISA_THROW_IF(file == nullptr, std::invalid_argument);
+  MARISA_THROW_IF(file == NULL, MARISA_NULL_ERROR);
 
   Writer temp;
   temp.open_(file);
@@ -37,7 +40,7 @@ void Writer::open(std::FILE *file) {
 }
 
 void Writer::open(int fd) {
-  MARISA_THROW_IF(fd == -1, std::invalid_argument);
+  MARISA_THROW_IF(fd == -1, MARISA_CODE_ERROR);
 
   Writer temp;
   temp.open_(fd);
@@ -50,23 +53,22 @@ void Writer::open(std::ostream &stream) {
   swap(temp);
 }
 
-void Writer::clear() noexcept {
+void Writer::clear() {
   Writer().swap(*this);
 }
 
-void Writer::swap(Writer &rhs) noexcept {
-  std::swap(file_, rhs.file_);
-  std::swap(fd_, rhs.fd_);
-  std::swap(stream_, rhs.stream_);
-  std::swap(needs_fclose_, rhs.needs_fclose_);
+void Writer::swap(Writer &rhs) {
+  marisa::swap(file_, rhs.file_);
+  marisa::swap(fd_, rhs.fd_);
+  marisa::swap(stream_, rhs.stream_);
+  marisa::swap(needs_fclose_, rhs.needs_fclose_);
 }
 
 void Writer::seek(std::size_t size) {
-  MARISA_THROW_IF(!is_open(), std::logic_error);
+  MARISA_THROW_IF(!is_open(), MARISA_STATE_ERROR);
   if (size == 0) {
     return;
-  }
-  if (size <= 16) {
+  } else if (size <= 16) {
     const char buf[16] = {};
     write_data(buf, size);
   } else {
@@ -80,19 +82,16 @@ void Writer::seek(std::size_t size) {
 }
 
 bool Writer::is_open() const {
-  return (file_ != nullptr) || (fd_ != -1) || (stream_ != nullptr);
+  return (file_ != NULL) || (fd_ != -1) || (stream_ != NULL);
 }
 
 void Writer::open_(const char *filename) {
-  std::FILE *file = nullptr;
+  std::FILE *file = NULL;
 #ifdef _MSC_VER
-  const errno_t error_value = ::fopen_s(&file, filename, "wb");
-  MARISA_THROW_SYSTEM_ERROR_IF(error_value != 0, error_value,
-                               std::generic_category(), "fopen_s");
-#else   // _MSC_VER
-  file = std::fopen(filename, "wb");
-  MARISA_THROW_SYSTEM_ERROR_IF(file == nullptr, errno, std::generic_category(),
-                               "std::fopen");
+  MARISA_THROW_IF(::fopen_s(&file, filename, "wb") != 0, MARISA_IO_ERROR);
+#else  // _MSC_VER
+  file = ::fopen(filename, "wb");
+  MARISA_THROW_IF(file == NULL, MARISA_IO_ERROR);
 #endif  // _MSC_VER
   file_ = file;
   needs_fclose_ = true;
@@ -111,39 +110,39 @@ void Writer::open_(std::ostream &stream) {
 }
 
 void Writer::write_data(const void *data, std::size_t size) {
-  MARISA_THROW_IF(!is_open(), std::logic_error);
+  MARISA_THROW_IF(!is_open(), MARISA_STATE_ERROR);
   if (size == 0) {
     return;
-  }
-  if (fd_ != -1) {
+  } else if (fd_ != -1) {
     while (size != 0) {
 #ifdef _WIN32
-      constexpr std::size_t CHUNK_SIZE = std::numeric_limits<int>::max();
+      static const std::size_t CHUNK_SIZE =
+          std::numeric_limits<int>::max();
       const unsigned int count = (size < CHUNK_SIZE) ? size : CHUNK_SIZE;
       const int size_written = ::_write(fd_, data, count);
-      MARISA_THROW_SYSTEM_ERROR_IF(size_written <= 0, errno,
-                                   std::generic_category(), "_write");
-#else   // _WIN32
-      constexpr std::size_t CHUNK_SIZE = std::numeric_limits< ::ssize_t>::max();
+#else  // _WIN32
+      static const std::size_t CHUNK_SIZE =
+          std::numeric_limits< ::ssize_t>::max();
       const ::size_t count = (size < CHUNK_SIZE) ? size : CHUNK_SIZE;
       const ::ssize_t size_written = ::write(fd_, data, count);
-      MARISA_THROW_SYSTEM_ERROR_IF(size_written <= 0, errno,
-                                   std::generic_category(), "write");
 #endif  // _WIN32
+      MARISA_THROW_IF(size_written <= 0, MARISA_IO_ERROR);
       data = static_cast<const char *>(data) + size_written;
       size -= static_cast<std::size_t>(size_written);
     }
-  } else if (file_ != nullptr) {
-    MARISA_THROW_SYSTEM_ERROR_IF(std::fwrite(data, 1, size, file_) != size,
-                                 errno, std::generic_category(), "std::fwrite");
-    MARISA_THROW_SYSTEM_ERROR_IF(std::fflush(file_) != 0, errno,
-                                 std::generic_category(), "std::fflush");
-  } else if (stream_ != nullptr) {
-    MARISA_THROW_IF(!stream_->write(static_cast<const char *>(data),
-                                    static_cast<std::streamsize>(size)),
-                    std::runtime_error);
-    MARISA_THROW_IF(!stream_->flush(), std::runtime_error);
+  } else if (file_ != NULL) {
+    MARISA_THROW_IF(::fwrite(data, 1, size, file_) != size, MARISA_IO_ERROR);
+    MARISA_THROW_IF(::fflush(file_) != 0, MARISA_IO_ERROR);
+  } else if (stream_ != NULL) {
+    try {
+      MARISA_THROW_IF(!stream_->write(static_cast<const char *>(data),
+          static_cast<std::streamsize>(size)), MARISA_IO_ERROR);
+    } catch (const std::ios_base::failure &) {
+      MARISA_THROW(MARISA_IO_ERROR, "std::ios_base::failure");
+    }
   }
 }
 
-}  // namespace marisa::grimoire::io
+}  // namespace io
+}  // namespace grimoire
+}  // namespace marisa

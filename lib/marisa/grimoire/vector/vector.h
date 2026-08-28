@@ -1,57 +1,43 @@
 #ifndef MARISA_GRIMOIRE_VECTOR_VECTOR_H_
 #define MARISA_GRIMOIRE_VECTOR_VECTOR_H_
 
-#include <cassert>
-#include <cstring>
-#include <memory>
 #include <new>
-#include <stdexcept>
-#include <type_traits>
-#include <utility>
 
+#include "marisa/grimoire/cuda_check.h"
 #include "marisa/grimoire/io.h"
 
-namespace marisa::grimoire::vector {
+namespace marisa {
+namespace grimoire {
+namespace vector {
+
+inline bool use_managed_allocations() {
+  static const bool result = [] {
+    const char *val = std::getenv("MARISA_MANAGED_ALLOC");
+    bool r = true;
+    if (val != nullptr) {
+      size_t pos;
+      int v = std::stoi(val, &pos);
+      MARISA_THROW_IF(pos != std::string(val).length(), MARISA_FORMAT_ERROR);
+      r = v != 0;
+    }
+    return r;
+  }();
+  return result;
+}
 
 template <typename T>
 class Vector {
  public:
-  // These assertions are repeated for clarity/robustness where the property
-  // is used.
-  static_assert(std::is_trivially_copyable_v<T>);
-  static_assert(std::is_trivially_destructible_v<T>);
-
-  Vector() = default;
-  // `T` is trivially destructible, so default destructor is ok.
-  ~Vector() = default;
-
-  Vector(const Vector<T> &other) : fixed_(other.fixed_) {
-    if (other.buf_ == nullptr) {
-      objs_ = other.objs_;
-      const_objs_ = other.const_objs_;
-      size_ = other.size_;
-      capacity_ = other.capacity_;
-    } else {
-      copyInit(other.const_objs_, other.size_, other.capacity_);
+  Vector()
+      : buf_(), objs_(NULL), const_objs_(NULL),
+        size_(0), capacity_(0), fixed_(false) {}
+  ~Vector() {
+    if (objs_ != NULL) {
+      for (std::size_t i = 0; i < size_; ++i) {
+        objs_[i].~T();
+      }
     }
   }
-
-  Vector &operator=(const Vector<T> &other) {
-    clear();
-    fixed_ = other.fixed_;
-    if (other.buf_ == nullptr) {
-      objs_ = other.objs_;
-      const_objs_ = other.const_objs_;
-      size_ = other.size_;
-      capacity_ = other.capacity_;
-    } else {
-      copyInit(other.const_objs_, other.size_, other.capacity_);
-    }
-    return *this;
-  }
-
-  Vector(Vector &&) noexcept = default;
-  Vector &operator=(Vector<T> &&) noexcept = default;
 
   void map(Mapper &mapper) {
     Vector temp;
@@ -69,50 +55,52 @@ class Vector {
     write_(writer);
   }
 
-  void push_back(const T &x) {
-    assert(!fixed_);
-    assert(size_ < max_size());
-    reserve(size_ + 1);
-    new (&objs_[size_]) T(x);
-    ++size_;
+  __host__ __device__ void push_back(const T &x) {
+#ifndef __CUDA_ARCH__
+      h_push_back(x);
+#else
+      d_push_back(x);
+#endif
   }
 
   void pop_back() {
-    assert(!fixed_);
-    assert(size_ != 0);
-    --size_;
-    static_assert(std::is_trivially_destructible_v<T>);
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
+    MARISA_DEBUG_IF(size_ == 0, MARISA_STATE_ERROR);
+    objs_[--size_].~T();
   }
 
   // resize() assumes that T's placement new does not throw an exception.
   void resize(std::size_t size) {
-    assert(!fixed_);
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
     reserve(size);
     for (std::size_t i = size_; i < size; ++i) {
       new (&objs_[i]) T;
     }
-    static_assert(std::is_trivially_destructible_v<T>);
+    for (std::size_t i = size; i < size_; ++i) {
+      objs_[i].~T();
+    }
     size_ = size;
   }
 
   // resize() assumes that T's placement new does not throw an exception.
   void resize(std::size_t size, const T &x) {
-    assert(!fixed_);
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
     reserve(size);
-    if (size > size_) {
-      std::fill_n(&objs_[size_], size - size_, x);
+    for (std::size_t i = size_; i < size; ++i) {
+      new (&objs_[i]) T(x);
     }
-    // No need to destroy old elements.
-    static_assert(std::is_trivially_destructible_v<T>);
+    for (std::size_t i = size; i < size_; ++i) {
+      objs_[i].~T();
+    }
     size_ = size;
   }
 
   void reserve(std::size_t capacity) {
-    assert(!fixed_);
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
     if (capacity <= capacity_) {
       return;
     }
-    assert(capacity <= max_size());
+    MARISA_DEBUG_IF(capacity > max_size(), MARISA_SIZE_ERROR);
     std::size_t new_capacity = capacity;
     if (capacity_ > (capacity / 2)) {
       if (capacity_ > (max_size() / 2)) {
@@ -125,14 +113,14 @@ class Vector {
   }
 
   void shrink() {
-    MARISA_THROW_IF(fixed_, std::logic_error);
+    MARISA_THROW_IF(fixed_, MARISA_STATE_ERROR);
     if (size_ != capacity_) {
       realloc(size_);
     }
   }
 
   void fix() {
-    MARISA_THROW_IF(fixed_, std::logic_error);
+    MARISA_THROW_IF(fixed_, MARISA_STATE_ERROR);
     fixed_ = true;
   }
 
@@ -142,44 +130,44 @@ class Vector {
   const T *end() const {
     return const_objs_ + size_;
   }
-  const T &operator[](std::size_t i) const {
-    assert(i < size_);
+  __host__ __device__ const T &operator[](std::size_t i) const {
+    MARISA_DEBUG_IF(i >= size_, MARISA_BOUND_ERROR);
     return const_objs_[i];
   }
   const T &front() const {
-    assert(size_ != 0);
+    MARISA_DEBUG_IF(size_ == 0, MARISA_STATE_ERROR);
     return const_objs_[0];
   }
   const T &back() const {
-    assert(size_ != 0);
+    MARISA_DEBUG_IF(size_ == 0, MARISA_STATE_ERROR);
     return const_objs_[size_ - 1];
   }
 
   T *begin() {
-    assert(!fixed_);
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
     return objs_;
   }
   T *end() {
-    assert(!fixed_);
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
     return objs_ + size_;
   }
-  T &operator[](std::size_t i) {
-    assert(!fixed_);
-    assert(i < size_);
+  __host__ __device__ T &operator[](std::size_t i) {
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
+    MARISA_DEBUG_IF(i >= size_, MARISA_BOUND_ERROR);
     return objs_[i];
   }
   T &front() {
-    assert(!fixed_);
-    assert(size_ != 0);
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
+    MARISA_DEBUG_IF(size_ == 0, MARISA_STATE_ERROR);
     return objs_[0];
   }
   T &back() {
-    assert(!fixed_);
-    assert(size_ != 0);
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
+    MARISA_DEBUG_IF(size_ == 0, MARISA_STATE_ERROR);
     return objs_[size_ - 1];
   }
 
-  std::size_t size() const {
+  __host__ __device__ std::size_t size() const {
     return size_;
   }
   std::size_t capacity() const {
@@ -196,97 +184,127 @@ class Vector {
     return sizeof(T) * size_;
   }
   std::size_t io_size() const {
-    return sizeof(uint64_t) + ((total_size() + 7) & ~0x07U);
+    return sizeof(UInt64) + ((total_size() + 7) & ~(std::size_t)0x07);
   }
 
-  void clear() noexcept {
+  void clear() {
     Vector().swap(*this);
   }
-  void swap(Vector &rhs) noexcept {
+  void swap(Vector &rhs) {
     buf_.swap(rhs.buf_);
-    std::swap(objs_, rhs.objs_);
-    std::swap(const_objs_, rhs.const_objs_);
-    std::swap(size_, rhs.size_);
-    std::swap(capacity_, rhs.capacity_);
-    std::swap(fixed_, rhs.fixed_);
+    marisa::swap(objs_, rhs.objs_);
+    marisa::swap(const_objs_, rhs.const_objs_);
+    marisa::swap(size_, rhs.size_);
+    marisa::swap(capacity_, rhs.capacity_);
+    marisa::swap(fixed_, rhs.fixed_);
   }
 
   static std::size_t max_size() {
-    return SIZE_MAX / sizeof(T);
+    return MARISA_SIZE_MAX / sizeof(T);
+  }
+
+  __device__ const T* data() const {
+    return const_objs_;
+  }
+
+  void prefetch() const {
+    if (!buf_.is_managed()) {
+      return;
+    }
+    cudaMemLocation location;
+    location.type = cudaMemLocationTypeDevice;
+    location.id = 0;
+    cudaMemPrefetchAsync_v2(buf_.get(), sizeof(T) * capacity_, location, 0);
   }
 
  private:
-  std::unique_ptr<char[]> buf_;
-  T *objs_ = nullptr;
-  const T *const_objs_ = nullptr;
-  std::size_t size_ = 0;
-  std::size_t capacity_ = 0;
-  bool fixed_ = false;
+  scoped_array<char> buf_;
+  T *objs_;
+  const T *const_objs_;
+  std::size_t size_;
+  std::size_t capacity_;
+  bool fixed_;
 
   void map_(Mapper &mapper) {
-    uint64_t total_size;
+    UInt64 total_size;
     mapper.map(&total_size);
-    MARISA_THROW_IF(total_size > SIZE_MAX, std::runtime_error);
-    MARISA_THROW_IF((total_size % sizeof(T)) != 0, std::runtime_error);
-    const std::size_t size = static_cast<std::size_t>(total_size / sizeof(T));
+    MARISA_THROW_IF(total_size > MARISA_SIZE_MAX, MARISA_SIZE_ERROR);
+    MARISA_THROW_IF((total_size % sizeof(T)) != 0, MARISA_FORMAT_ERROR);
+    const std::size_t size = (std::size_t)(total_size / sizeof(T));
     mapper.map(&const_objs_, size);
-    mapper.seek(static_cast<std::size_t>((8 - (total_size % 8)) % 8));
+    mapper.seek((std::size_t)((8 - (total_size % 8)) % 8));
     size_ = size;
     fix();
   }
   void read_(Reader &reader) {
-    uint64_t total_size;
+    UInt64 total_size;
     reader.read(&total_size);
-    MARISA_THROW_IF(total_size > SIZE_MAX, std::runtime_error);
-    MARISA_THROW_IF((total_size % sizeof(T)) != 0, std::runtime_error);
-    const std::size_t size = static_cast<std::size_t>(total_size / sizeof(T));
+    MARISA_THROW_IF(total_size > MARISA_SIZE_MAX, MARISA_SIZE_ERROR);
+    MARISA_THROW_IF((total_size % sizeof(T)) != 0, MARISA_FORMAT_ERROR);
+    const std::size_t size = (std::size_t)(total_size / sizeof(T));
     resize(size);
     reader.read(objs_, size);
-    reader.seek(static_cast<std::size_t>((8 - (total_size % 8)) % 8));
+    reader.seek((std::size_t)((8 - (total_size % 8)) % 8));
   }
   void write_(Writer &writer) const {
-    writer.write(static_cast<uint64_t>(total_size()));
+    writer.write((UInt64)total_size());
     writer.write(const_objs_, size_);
     writer.seek((8 - (total_size() % 8)) % 8);
   }
 
-  // Copies current elements to new buffer of size `new_capacity`.
-  // Requires `new_capacity >= size_`.
-  void realloc(std::size_t new_capacity) {
-    assert(new_capacity >= size_);
-    assert(new_capacity <= max_size());
+  void h_push_back(const T &x) {
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
+    MARISA_DEBUG_IF(size_ == max_size(), MARISA_SIZE_ERROR);
+    reserve(size_ + 1);
+    new (&objs_[size_]) T(x);
+    ++size_;
+  }
 
-    std::unique_ptr<char[]> new_buf(new char[sizeof(T) * new_capacity]);
+  __device__ void d_push_back(const T &x) {
+    MARISA_DEBUG_IF(fixed_, MARISA_STATE_ERROR);
+    MARISA_DEBUG_IF(size_ == max_size(), MARISA_SIZE_ERROR);
+    assert(size_ + 1 <= capacity_);
+    new (&objs_[size_]) T(x);
+    ++size_;
+  }
+
+  // realloc() assumes that T's placement new does not throw an exception.
+  void realloc(std::size_t new_capacity) {
+    MARISA_DEBUG_IF(new_capacity > max_size(), MARISA_SIZE_ERROR);
+
+    char *new_buf_ptr;
+    bool is_managed = use_managed_allocations();
+    if (is_managed) {
+      CUDA_CHECK(
+          cudaMallocManaged((void **)&new_buf_ptr, sizeof(T) * new_capacity));
+    } else {
+      new_buf_ptr = (char *)malloc(sizeof(T) * new_capacity);
+    }
+    scoped_array<char> new_buf(new_buf_ptr, is_managed);
+
+    MARISA_DEBUG_IF(new_buf.get() == NULL, MARISA_MEMORY_ERROR);
     T *new_objs = reinterpret_cast<T *>(new_buf.get());
 
-    static_assert(std::is_trivially_copyable_v<T>);
-    std::memcpy(new_objs, objs_, sizeof(T) * size_);
+    for (std::size_t i = 0; i < size_; ++i) {
+      new (&new_objs[i]) T(objs_[i]);
+    }
+    for (std::size_t i = 0; i < size_; ++i) {
+      objs_[i].~T();
+    }
 
-    buf_ = std::move(new_buf);
+    buf_.swap(new_buf);
     objs_ = new_objs;
     const_objs_ = new_objs;
     capacity_ = new_capacity;
   }
 
-  // copyInit() assumes that T's placement new does not throw an exception.
-  // Requires the vector to be empty.
-  void copyInit(const T *src, std::size_t size, std::size_t capacity) {
-    assert(size_ == 0);
-
-    std::unique_ptr<char[]> new_buf(new char[sizeof(T) * capacity]);
-    T *new_objs = reinterpret_cast<T *>(new_buf.get());
-
-    static_assert(std::is_trivially_copyable_v<T>);
-    std::memcpy(new_objs, src, sizeof(T) * size);
-
-    buf_ = std::move(new_buf);
-    objs_ = new_objs;
-    const_objs_ = new_objs;
-    size_ = size;
-    capacity_ = capacity;
-  }
+  // Disallows copy and assignment.
+  Vector(const Vector &);
+  Vector &operator=(const Vector &);
 };
 
-}  // namespace marisa::grimoire::vector
+}  // namespace vector
+}  // namespace grimoire
+}  // namespace marisa
 
 #endif  // MARISA_GRIMOIRE_VECTOR_VECTOR_H_

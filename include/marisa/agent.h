@@ -1,80 +1,85 @@
 #ifndef MARISA_AGENT_H_
 #define MARISA_AGENT_H_
 
-#include <cassert>
-#include <memory>
-#include <string_view>
+#include <cmath>
 
+#include "marisa/grimoire/trie/state.h"
 #include "marisa/key.h"
 #include "marisa/query.h"
 
 namespace marisa {
-namespace grimoire::trie {
+namespace grimoire {
+namespace trie {
 
 class State;
 
-}  // namespace grimoire::trie
+}  // namespace trie
+}  // namespace grimoire
 
 class Agent {
  public:
-  Agent();
+  Agent(double length_norm = 0);
+  Agent(const Agent &parent, Label token, float score);
   ~Agent();
 
-  Agent(const Agent &other);
-  Agent &operator=(const Agent &other);
-  Agent(Agent &&other) noexcept;
-  Agent &operator=(Agent &&other) noexcept;
-
-  const Query &query() const {
+  __host__ __device__ const Query &query() const {
     return query_;
   }
   const Key &key() const {
     return key_;
   }
 
-  void set_query(std::string_view str) {
-    set_query(str.data(), str.length());
+  void set_query(const std::vector<Label>& str) {
+    set_query(str.data(), str.size());
   }
-  void set_query(const char *str);
-  void set_query(const char *ptr, std::size_t length);
+  void set_query(const Label *ptr, std::size_t length);
   void set_query(std::size_t key_id);
 
-  const grimoire::trie::State &state() const {
+  __host__ __device__ const grimoire::trie::State &state() const {
     return *state_;
   }
-  grimoire::trie::State &state() {
+  __host__ __device__ grimoire::trie::State &state() {
     return *state_;
   }
 
-  void set_key(std::string_view str) {
-    set_key(str.data(), str.length());
+  void set_key(const std::vector<Label>& str) {
+    set_key(str.data(), str.size());
   }
-  void set_key(const char *str) {
-    assert(str != nullptr);
-    key_.set_str(str);
-  }
-  void set_key(const char *ptr, std::size_t length) {
-    assert((ptr != nullptr) || (length == 0));
-    assert(length <= UINT32_MAX);
+  void set_key(const Label *ptr, std::size_t length) {
+    MARISA_DEBUG_IF((ptr == NULL) && (length != 0), MARISA_NULL_ERROR);
+    MARISA_DEBUG_IF(length > MARISA_UINT32_MAX, MARISA_SIZE_ERROR);
     key_.set_str(ptr, length);
   }
   void set_key(std::size_t id) {
-    assert(id <= UINT32_MAX);
+    MARISA_DEBUG_IF(id > MARISA_UINT32_MAX, MARISA_SIZE_ERROR);
     key_.set_id(id);
   }
 
   bool has_state() const {
-    return state_ != nullptr;
+    return state_.get() != NULL;
   }
   void init_state();
 
-  void clear() noexcept;
-  void swap(Agent &rhs) noexcept;
+  void clear();
+  void swap(Agent &rhs);
+
+  __host__ __device__ double logp() const {
+    return state_->score();
+  }
+  double logp_norm() const {
+    return logp() *
+           std::pow(6.0 / (5.0 + (double)query_.length()), length_norm_);
+  }
 
  private:
   Query query_;
   Key key_;
-  std::unique_ptr<grimoire::trie::State> state_;
+  scoped_ptr<grimoire::trie::State> state_;
+  double length_norm_;
+
+  // Disallows copy and assignment.
+  Agent(const Agent &);
+  Agent &operator=(const Agent &);
 };
 
 }  // namespace marisa

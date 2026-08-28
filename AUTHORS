@@ -1,1 +1,21 @@
+FlashTrie
+---------
+
+Dakshitha Anandakumar (Microsoft)
+Anurag Mukkara (NVIDIA)
+Wenxiang Hu (Microsoft)
+M Akash Kumar (Microsoft)
+Jiusheng Chen (Microsoft)
+Ting Ye (Microsoft)
+Qiang Lou (Microsoft)
+Jian Jiao (Microsoft)
+
+marisa-trie
+-----------
+
+FlashTrie is built on marisa-trie (https://github.com/s-yata/marisa-trie).
+
 Susumu Yata <susumu.yata@gmail.com>
+
+See the project's commit history for the full list of marisa-trie
+contributors.

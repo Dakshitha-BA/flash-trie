@@ -1,11 +1,11 @@
 #ifndef MARISA_GRIMOIRE_ALGORITHM_SORT_H_
 #define MARISA_GRIMOIRE_ALGORITHM_SORT_H_
 
-#include <cassert>
-
 #include "marisa/base.h"
 
-namespace marisa::grimoire::algorithm {
+namespace marisa {
+namespace grimoire {
+namespace algorithm {
 namespace details {
 
 enum {
@@ -14,9 +14,9 @@ enum {
 
 template <typename T>
 int get_label(const T &unit, std::size_t depth) {
-  assert(depth <= unit.length());
+  MARISA_DEBUG_IF(depth > unit.length(), MARISA_BOUND_ERROR);
 
-  return (depth < unit.length()) ? int{static_cast<uint8_t>(unit[depth])} : -1;
+  return (depth < unit.length()) ? (int)unit[depth] : -1;
 }
 
 template <typename T>
@@ -46,7 +46,7 @@ int compare(const T &lhs, const T &rhs, std::size_t depth) {
       return 1;
     }
     if (lhs[i] != rhs[i]) {
-      return static_cast<uint8_t>(lhs[i]) - static_cast<uint8_t>(rhs[i]);
+      return lhs[i] - rhs[i];
     }
   }
   if (lhs.length() == rhs.length()) {
@@ -57,7 +57,7 @@ int compare(const T &lhs, const T &rhs, std::size_t depth) {
 
 template <typename Iterator>
 std::size_t insertion_sort(Iterator l, Iterator r, std::size_t depth) {
-  assert(l <= r);
+  MARISA_DEBUG_IF(l > r, MARISA_BOUND_ERROR);
 
   std::size_t count = 1;
   for (Iterator i = l + 1; i < r; ++i) {
@@ -67,7 +67,7 @@ std::size_t insertion_sort(Iterator l, Iterator r, std::size_t depth) {
       if (result <= 0) {
         break;
       }
-      std::swap(*(j - 1), *j);
+      marisa::swap(*(j - 1), *j);
     }
     if (result != 0) {
       ++count;
@@ -78,7 +78,7 @@ std::size_t insertion_sort(Iterator l, Iterator r, std::size_t depth) {
 
 template <typename Iterator>
 std::size_t sort(Iterator l, Iterator r, std::size_t depth) {
-  assert(l <= r);
+  MARISA_DEBUG_IF(l > r, MARISA_BOUND_ERROR);
 
   std::size_t count = 0;
   while ((r - l) > MARISA_INSERTION_SORT_THRESHOLD) {
@@ -88,13 +88,13 @@ std::size_t sort(Iterator l, Iterator r, std::size_t depth) {
     Iterator pivot_r = r;
 
     const int pivot = median(*l, *(l + (r - l) / 2), *(r - 1), depth);
-    for (;;) {
+    for ( ; ; ) {
       while (pl < pr) {
         const int label = get_label(*pl, depth);
         if (label > pivot) {
           break;
         } else if (label == pivot) {
-          std::swap(*pl, *pivot_l);
+          marisa::swap(*pl, *pivot_l);
           ++pivot_l;
         }
         ++pl;
@@ -104,20 +104,20 @@ std::size_t sort(Iterator l, Iterator r, std::size_t depth) {
         if (label < pivot) {
           break;
         } else if (label == pivot) {
-          std::swap(*pr, *--pivot_r);
+          marisa::swap(*pr, *--pivot_r);
         }
       }
       if (pl >= pr) {
         break;
       }
-      std::swap(*pl, *pr);
+      marisa::swap(*pl, *pr);
       ++pl;
     }
     while (pivot_l > l) {
-      std::swap(*--pivot_l, *--pl);
+      marisa::swap(*--pivot_l, *--pl);
     }
     while (pivot_r < r) {
-      std::swap(*pivot_r, *pr);
+      marisa::swap(*pivot_r, *pr);
       ++pivot_r;
       ++pr;
     }
@@ -185,10 +185,12 @@ std::size_t sort(Iterator l, Iterator r, std::size_t depth) {
 
 template <typename Iterator>
 std::size_t sort(Iterator begin, Iterator end) {
-  assert(begin <= end);
+  MARISA_DEBUG_IF(begin > end, MARISA_BOUND_ERROR);
   return details::sort(begin, end, 0);
 }
 
-}  // namespace marisa::grimoire::algorithm
+}  // namespace algorithm
+}  // namespace grimoire
+}  // namespace marisa
 
 #endif  // MARISA_GRIMOIRE_ALGORITHM_SORT_H_

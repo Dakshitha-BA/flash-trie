@@ -1,35 +1,37 @@
 #ifndef MARISA_GRIMOIRE_TRIE_STATE_HISTORY_H_
 #define MARISA_GRIMOIRE_TRIE_STATE_HISTORY_H_
 
-#include <cassert>
-
 #include "marisa/base.h"
 
-namespace marisa::grimoire::trie {
+namespace marisa {
+namespace grimoire {
+namespace trie {
 
 class History {
  public:
-  History() = default;
+  History()
+      : node_id_(0), louds_pos_(0), key_pos_(0),
+        link_id_(MARISA_INVALID_LINK_ID), key_id_(MARISA_INVALID_KEY_ID) {}
 
   void set_node_id(std::size_t node_id) {
-    assert(node_id <= UINT32_MAX);
-    node_id_ = static_cast<uint32_t>(node_id);
+    MARISA_DEBUG_IF(node_id > MARISA_UINT32_MAX, MARISA_SIZE_ERROR);
+    node_id_ = (UInt32)node_id;
   }
   void set_louds_pos(std::size_t louds_pos) {
-    assert(louds_pos <= UINT32_MAX);
-    louds_pos_ = static_cast<uint32_t>(louds_pos);
+    MARISA_DEBUG_IF(louds_pos > MARISA_UINT32_MAX, MARISA_SIZE_ERROR);
+    louds_pos_ = (UInt32)louds_pos;
   }
   void set_key_pos(std::size_t key_pos) {
-    assert(key_pos <= UINT32_MAX);
-    key_pos_ = static_cast<uint32_t>(key_pos);
+    MARISA_DEBUG_IF(key_pos > MARISA_UINT32_MAX, MARISA_SIZE_ERROR);
+    key_pos_ = (UInt32)key_pos;
   }
   void set_link_id(std::size_t link_id) {
-    assert(link_id <= UINT32_MAX);
-    link_id_ = static_cast<uint32_t>(link_id);
+    MARISA_DEBUG_IF(link_id > MARISA_UINT32_MAX, MARISA_SIZE_ERROR);
+    link_id_ = (UInt32)link_id;
   }
   void set_key_id(std::size_t key_id) {
-    assert(key_id <= UINT32_MAX);
-    key_id_ = static_cast<uint32_t>(key_id);
+    MARISA_DEBUG_IF(key_id > MARISA_UINT32_MAX, MARISA_SIZE_ERROR);
+    key_id_ = (UInt32)key_id;
   }
 
   std::size_t node_id() const {
@@ -49,13 +51,15 @@ class History {
   }
 
  private:
-  uint32_t node_id_ = 0;
-  uint32_t louds_pos_ = 0;
-  uint32_t key_pos_ = 0;
-  uint32_t link_id_ = MARISA_INVALID_LINK_ID;
-  uint32_t key_id_ = MARISA_INVALID_KEY_ID;
+  UInt32 node_id_;
+  UInt32 louds_pos_;
+  UInt32 key_pos_;
+  UInt32 link_id_;
+  UInt32 key_id_;
 };
 
-}  // namespace marisa::grimoire::trie
+}  // namespace trie
+}  // namespace grimoire
+}  // namespace marisa
 
 #endif  // MARISA_GRIMOIRE_TRIE_STATE_HISTORY_H_

@@ -1,26 +1,23 @@
 #ifndef MARISA_GRIMOIRE_VECTOR_BIT_VECTOR_H_
 #define MARISA_GRIMOIRE_VECTOR_BIT_VECTOR_H_
 
-#include <cassert>
-#include <stdexcept>
-
 #include "marisa/grimoire/vector/rank-index.h"
 #include "marisa/grimoire/vector/vector.h"
 
-namespace marisa::grimoire::vector {
+namespace marisa {
+namespace grimoire {
+namespace vector {
 
 class BitVector {
  public:
 #if MARISA_WORD_SIZE == 64
-  using Unit = uint64_t;
-#else   // MARISA_WORD_SIZE == 64
-  using Unit = uint32_t;
+  typedef UInt64 Unit;
+#else  // MARISA_WORD_SIZE == 64
+  typedef UInt32 Unit;
 #endif  // MARISA_WORD_SIZE == 64
 
-  BitVector() = default;
-
-  BitVector(const BitVector &) = delete;
-  BitVector &operator=(const BitVector &) = delete;
+  BitVector()
+      : units_(), size_(0), num_1s_(0), ranks_(), select0s_(), select1s_() {}
 
   void build(bool enables_select0, bool enables_select1) {
     BitVector temp;
@@ -52,89 +49,148 @@ class BitVector {
   }
 
   void push_back(bool bit) {
-    MARISA_THROW_IF(size_ == UINT32_MAX, std::length_error);
+    MARISA_THROW_IF(size_ == MARISA_UINT32_MAX, MARISA_SIZE_ERROR);
     if (size_ == (MARISA_WORD_SIZE * units_.size())) {
       units_.resize(units_.size() + (64 / MARISA_WORD_SIZE), 0);
     }
     if (bit) {
-      units_[size_ / MARISA_WORD_SIZE] |= Unit{1} << (size_ % MARISA_WORD_SIZE);
+      units_[size_ / MARISA_WORD_SIZE] |=
+          (Unit)1 << (size_ % MARISA_WORD_SIZE);
       ++num_1s_;
     }
     ++size_;
   }
 
-  bool operator[](std::size_t i) const {
-    assert(i < size_);
-    return (units_[i / MARISA_WORD_SIZE] &
-            (Unit{1} << (i % MARISA_WORD_SIZE))) != 0;
+  __device__ std::size_t find_next_set(std::size_t i) const {
+    std::size_t word_id = i / MARISA_WORD_SIZE;
+    std::size_t bit_id = i % MARISA_WORD_SIZE;
+    Unit word = units_[word_id];
+    word &= ~(Unit(0)) << bit_id;
+    while (word == 0) {
+      word = units_[++word_id];
+    }
+    return (word_id * MARISA_WORD_SIZE) + __builtin_ffsll(word) - 1;
+  }
+
+  __device__ std::size_t find_next_unset(std::size_t i) const {
+    std::size_t word_id = i / MARISA_WORD_SIZE;
+    std::size_t bit_id = i % MARISA_WORD_SIZE;
+    Unit word = units_[word_id];
+    word |= ~(~(Unit(0)) << bit_id);
+    while ((~word) == 0) {
+      word = units_[++word_id];
+    }
+    return (word_id * MARISA_WORD_SIZE) + __builtin_ffsll(~word) - 1;
+  }
+
+  __device__ std::size_t warp_find_next_unset(std::size_t i) const {
+#ifdef __CUDA_ARCH__
+    std::size_t word_id = i / MARISA_WORD_SIZE;
+    std::size_t bit_id = i % MARISA_WORD_SIZE;
+    Unit word = units_[word_id];
+    word |= ~(~(Unit(0)) << bit_id);
+    if ((~word) == 0) {
+      word_id++;
+      // warp-wide scan for the first word with an unset bit
+      const auto lane_id = threadIdx.x % warpSize;
+      while (true) {
+        bool stop_scan = (~units_[word_id + lane_id]) != 0;
+        uint32_t stop_scan_warp = __ballot_sync(0xffffffff, stop_scan);
+        if (stop_scan_warp == 0) {
+          word_id += warpSize;
+        } else {
+          word_id += __ffs(stop_scan_warp) - 1;
+          break;
+        }
+      }
+      word = units_[word_id];
+    }
+    return (word_id * MARISA_WORD_SIZE) + __builtin_ffsll(~word) - 1;
+#else
+    assert(false);
+    return i;
+#endif
+  }
+
+  __host__ __device__ bool operator[](std::size_t i) const {
+    MARISA_DEBUG_IF(i >= size_, MARISA_BOUND_ERROR);
+    return (units_[i / MARISA_WORD_SIZE]
+        & ((Unit)1 << (i % MARISA_WORD_SIZE))) != 0;
   }
 
   std::size_t rank0(std::size_t i) const {
-    assert(!ranks_.empty());
-    assert(i <= size_);
+    MARISA_DEBUG_IF(ranks_.empty(), MARISA_STATE_ERROR);
+    MARISA_DEBUG_IF(i > size_, MARISA_BOUND_ERROR);
     return i - rank1(i);
   }
-  std::size_t rank1(std::size_t i) const;
+  __host__ __device__ std::size_t rank1(std::size_t i) const;
 
-  std::size_t select0(std::size_t i) const;
-  std::size_t select1(std::size_t i) const;
+  __host__ __device__ std::size_t select0(std::size_t i) const;
+  __host__ __device__ std::size_t select1(std::size_t i) const;
 
-  std::size_t num_0s() const {
+  __host__ __device__ std::size_t num_0s() const {
     return size_ - num_1s_;
   }
-  std::size_t num_1s() const {
+  __host__ __device__ std::size_t num_1s() const {
     return num_1s_;
   }
 
-  bool empty() const {
+  __host__ __device__ bool empty() const {
     return size_ == 0;
   }
-  std::size_t size() const {
+  __host__ __device__ std::size_t size() const {
     return size_;
   }
   std::size_t total_size() const {
-    return units_.total_size() + ranks_.total_size() + select0s_.total_size() +
-           select1s_.total_size();
+    return units_.total_size() + ranks_.total_size()
+        + select0s_.total_size() + select1s_.total_size();
   }
   std::size_t io_size() const {
-    return units_.io_size() + (sizeof(uint32_t) * 2) + ranks_.io_size() +
-           select0s_.io_size() + select1s_.io_size();
+    return units_.io_size() + (sizeof(UInt32) * 2) + ranks_.io_size()
+        + select0s_.io_size() + select1s_.io_size();
   }
 
-  void clear() noexcept {
+  void clear() {
     BitVector().swap(*this);
   }
-  void swap(BitVector &rhs) noexcept {
+  void swap(BitVector &rhs) {
     units_.swap(rhs.units_);
-    std::swap(size_, rhs.size_);
-    std::swap(num_1s_, rhs.num_1s_);
+    marisa::swap(size_, rhs.size_);
+    marisa::swap(num_1s_, rhs.num_1s_);
     ranks_.swap(rhs.ranks_);
     select0s_.swap(rhs.select0s_);
     select1s_.swap(rhs.select1s_);
   }
 
+  void prefetch() const {
+    units_.prefetch();
+    ranks_.prefetch();
+    select0s_.prefetch();
+    select1s_.prefetch();
+  }
+
  private:
   Vector<Unit> units_;
-  std::size_t size_ = 0;
-  std::size_t num_1s_ = 0;
+  std::size_t size_;
+  std::size_t num_1s_;
   Vector<RankIndex> ranks_;
-  Vector<uint32_t> select0s_;
-  Vector<uint32_t> select1s_;
+  Vector<UInt32> select0s_;
+  Vector<UInt32> select1s_;
 
-  void build_index(const BitVector &bv, bool enables_select0,
-                   bool enables_select1);
+  void build_index(const BitVector &bv,
+      bool enables_select0, bool enables_select1);
 
   void map_(Mapper &mapper) {
     units_.map(mapper);
     {
-      uint32_t temp_size;
+      UInt32 temp_size;
       mapper.map(&temp_size);
       size_ = temp_size;
     }
     {
-      uint32_t temp_num_1s;
+      UInt32 temp_num_1s;
       mapper.map(&temp_num_1s);
-      MARISA_THROW_IF(temp_num_1s > size_, std::runtime_error);
+      MARISA_THROW_IF(temp_num_1s > size_, MARISA_FORMAT_ERROR);
       num_1s_ = temp_num_1s;
     }
     ranks_.map(mapper);
@@ -145,14 +201,14 @@ class BitVector {
   void read_(Reader &reader) {
     units_.read(reader);
     {
-      uint32_t temp_size;
+      UInt32 temp_size;
       reader.read(&temp_size);
       size_ = temp_size;
     }
     {
-      uint32_t temp_num_1s;
+      UInt32 temp_num_1s;
       reader.read(&temp_num_1s);
-      MARISA_THROW_IF(temp_num_1s > size_, std::runtime_error);
+      MARISA_THROW_IF(temp_num_1s > size_, MARISA_FORMAT_ERROR);
       num_1s_ = temp_num_1s;
     }
     ranks_.read(reader);
@@ -162,14 +218,20 @@ class BitVector {
 
   void write_(Writer &writer) const {
     units_.write(writer);
-    writer.write(static_cast<uint32_t>(size_));
-    writer.write(static_cast<uint32_t>(num_1s_));
+    writer.write((UInt32)size_);
+    writer.write((UInt32)num_1s_);
     ranks_.write(writer);
     select0s_.write(writer);
     select1s_.write(writer);
   }
+
+  // Disallows copy and assignment.
+  BitVector(const BitVector &);
+  BitVector &operator=(const BitVector &);
 };
 
-}  // namespace marisa::grimoire::vector
+}  // namespace vector
+}  // namespace grimoire
+}  // namespace marisa
 
 #endif  // MARISA_GRIMOIRE_VECTOR_BIT_VECTOR_H_

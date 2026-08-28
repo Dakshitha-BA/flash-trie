@@ -1,35 +1,42 @@
 #ifndef MARISA_GRIMOIRE_TRIE_ENTRY_H_
 #define MARISA_GRIMOIRE_TRIE_ENTRY_H_
 
-#include <cassert>
-
 #include "marisa/base.h"
 
-namespace marisa::grimoire::trie {
+namespace marisa {
+namespace grimoire {
+namespace trie {
 
 class Entry {
  public:
-  Entry() = default;
-  Entry(const Entry &entry) = default;
-  Entry &operator=(const Entry &entry) = default;
+  Entry() : ptr_(NULL), length_(0), id_(0) {}
+  Entry(const Entry &entry)
+      : ptr_(entry.ptr_), length_(entry.length_), id_(entry.id_) {}
 
-  char operator[](std::size_t i) const {
-    assert(i < length_);
+  Entry &operator=(const Entry &entry) {
+    ptr_ = entry.ptr_;
+    length_ = entry.length_;
+    id_ = entry.id_;
+    return *this;
+  }
+
+  Label operator[](std::size_t i) const {
+    MARISA_DEBUG_IF(i >= length_, MARISA_BOUND_ERROR);
     return *(ptr_ - i);
   }
 
-  void set_str(const char *ptr, std::size_t length) {
-    assert((ptr != nullptr) || (length == 0));
-    assert(length <= UINT32_MAX);
+  void set_str(const Label *ptr, std::size_t length) {
+    MARISA_DEBUG_IF((ptr == NULL) && (length != 0), MARISA_NULL_ERROR);
+    MARISA_DEBUG_IF(length > MARISA_UINT32_MAX, MARISA_SIZE_ERROR);
     ptr_ = ptr + length - 1;
-    length_ = static_cast<uint32_t>(length);
+    length_ = (UInt32)length;
   }
   void set_id(std::size_t id) {
-    assert(id <= UINT32_MAX);
-    id_ = static_cast<uint32_t>(id);
+    MARISA_DEBUG_IF(id > MARISA_UINT32_MAX, MARISA_SIZE_ERROR);
+    id_ = (UInt32)id;
   }
 
-  const char *ptr() const {
+  const Label *ptr() const {
     return ptr_ - length_ + 1;
   }
   std::size_t length() const {
@@ -47,7 +54,7 @@ class Entry {
           return true;
         }
         if (lhs[i] != rhs[i]) {
-          return static_cast<uint8_t>(lhs[i]) > static_cast<uint8_t>(rhs[i]);
+          return lhs[i] > rhs[i];
         }
       }
       return lhs.length() > rhs.length();
@@ -62,11 +69,13 @@ class Entry {
   };
 
  private:
-  const char *ptr_ = nullptr;
-  uint32_t length_ = 0;
-  uint32_t id_ = 0;
+  const Label *ptr_;
+  UInt32 length_;
+  UInt32 id_;
 };
 
-}  // namespace marisa::grimoire::trie
+}  // namespace trie
+}  // namespace grimoire
+}  // namespace marisa
 
 #endif  // MARISA_GRIMOIRE_TRIE_ENTRY_H_

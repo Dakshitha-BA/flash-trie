@@ -1,11 +1,11 @@
 #ifndef MARISA_GRIMOIRE_TRIE_HEADER_H_
 #define MARISA_GRIMOIRE_TRIE_HEADER_H_
 
-#include <stdexcept>
-
 #include "marisa/grimoire/io.h"
 
-namespace marisa::grimoire::trie {
+namespace marisa {
+namespace grimoire {
+namespace trie {
 
 class Header {
  public:
@@ -13,20 +13,17 @@ class Header {
     HEADER_SIZE = 16
   };
 
-  Header() = default;
-
-  Header(const Header &) = delete;
-  Header &operator=(const Header &) = delete;
+  Header() {}
 
   void map(Mapper &mapper) {
     const char *ptr;
     mapper.map(&ptr, HEADER_SIZE);
-    MARISA_THROW_IF(!test_header(ptr), std::runtime_error);
+    MARISA_THROW_IF(!test_header(ptr), MARISA_FORMAT_ERROR);
   }
   void read(Reader &reader) {
     char buf[HEADER_SIZE];
     reader.read(buf, HEADER_SIZE);
-    MARISA_THROW_IF(!test_header(buf), std::runtime_error);
+    MARISA_THROW_IF(!test_header(buf), MARISA_FORMAT_ERROR);
   }
   void write(Writer &writer) const {
     writer.write(get_header(), HEADER_SIZE);
@@ -37,6 +34,7 @@ class Header {
   }
 
  private:
+
   static const char *get_header() {
     static const char buf[HEADER_SIZE] = "We love Marisa.";
     return buf;
@@ -50,8 +48,14 @@ class Header {
     }
     return true;
   }
+
+  // Disallows copy and assignment.
+  Header(const Header &);
+  Header &operator=(const Header &);
 };
 
-}  // namespace marisa::grimoire::trie
+}  // namespace trie
+}  // namespace marisa
+}  // namespace grimoire
 
 #endif  // MARISA_GRIMOIRE_TRIE_HEADER_H_
