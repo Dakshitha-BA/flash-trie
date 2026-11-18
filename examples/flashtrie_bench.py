@@ -15,10 +15,11 @@ this repository actually export:
 Everything the example scripts need is built on top of these.
 """
 
+import glob
+import importlib.util
 import json
 import math
 import os
-import sys
 import time
 
 import numpy as np
@@ -32,27 +33,56 @@ __all__ = [
 ]
 
 
-def import_flashtrie():
-    """Import the compiled ``flashtrie`` extension.
+def _load_built_extension(build_dir):
+    """Load ``_core`` (or a pre-package ``flashtrie`` extension) from a build dir."""
+    if not build_dir or not os.path.isdir(build_dir):
+        return None
+    matches = []
+    for pattern in ("_core*.so", "_core*.pyd", "flashtrie*.so", "flashtrie*.pyd"):
+        matches.extend(glob.glob(os.path.join(build_dir, pattern)))
+    matches = [path for path in matches if os.path.isfile(path)]
+    matches.sort(
+        key=lambda path: (
+            0 if os.path.basename(path).startswith("_core") else 1, path))
+    if not matches:
+        return None
+    path = matches[0]
+    stem = os.path.basename(path).split(".", 1)[0]
+    spec = importlib.util.spec_from_file_location(stem, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load FlashTrie extension at {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
-    Searches ``FLASHTRIE_BUILD_DIR`` if set, otherwise ``<repo>/build/tools``.
+
+def import_flashtrie():
+    """Import FlashTrie for the in-repo benchmarks.
+
+    Prefers the extension just built in ``build/tools`` so a local rebuild is
+    what gets measured. Falls back to the installed ``flashtrie`` package.
     """
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     build_dir = os.environ.get(
         "FLASHTRIE_BUILD_DIR", os.path.join(repo_root, "build", "tools"))
-    if build_dir and build_dir not in sys.path:
-        sys.path.insert(0, build_dir)
+    module = _load_built_extension(build_dir)
+    if module is not None:
+        return module
     try:
         import flashtrie
+        if flashtrie.Trie is None:
+            raise ImportError("installed flashtrie has no Trie")
     except ImportError as exc:
         raise SystemExit(
-            f"Could not import the 'flashtrie' extension module ({exc}).\n"
+            f"Could not import flashtrie ({exc}).\n"
             f"Looked in: {build_dir}\n"
-            "Build it first:\n"
+            "Install the library:\n"
+            "    pip install .\n"
+            "or build the extension used by these benchmarks:\n"
             "    cmake -B build -DCMAKE_BUILD_TYPE=Release\n"
             "    cmake --build build -j\n"
             "or point FLASHTRIE_BUILD_DIR at the directory containing "
-            "flashtrie*.so.") from exc
+            "_core*.so.") from exc
     return flashtrie
 
 

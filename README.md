@@ -101,25 +101,73 @@ FlashTrie does.
 
 ## Installation
 
+Other teams should install the Python library and import it. Do not add this
+repository to `sys.path`.
+
 ### Requirements
 
-- CUDA-capable NVIDIA GPU (developed and tested on A100 80 GB)
-- CUDA Toolkit with `nvcc`
+- Linux with a CUDA-capable NVIDIA GPU (developed and tested on A100 80 GB)
+- CUDA Toolkit with `nvcc` on `PATH`
 - CMake ≥ 3.14
 - A C++17 compiler
-- Python 3.8+ with `pybind11` and `numpy`, for the Python API and examples
+- Python 3.8+
 
-### Build
+`numpy` is only needed for the benchmark scripts (`pip install ".[examples]"`),
+not for `import flashtrie`.
+
+### Install the library
+
+From a checkout, on the machine that will run the search:
 
 ```bash
 git clone https://github.com/Dakshitha-BA/flash-trie.git
 cd flash-trie
+pip install .
+```
+
+Pin a release so a later commit here does not change that team's build:
+
+```bash
+pip install "flashtrie @ git+https://github.com/Dakshitha-BA/flash-trie.git@v0.1.0"
+```
+
+The extension is compiled for the CUDA architecture selected at build time.
+The default is compute capability 8.0 (Ampere). Override it for the GPU you
+will serve on:
+
+```bash
+CMAKE_ARGS="-DCMAKE_CUDA_ARCHITECTURES=90" pip install .   # Hopper
+```
+
+```python
+import flashtrie
+print(flashtrie.__version__)
+```
+
+[`examples/quickstart.py`](examples/quickstart.py) is a complete call.
+
+### Releases
+
+`VERSION` is the only version number. To publish an update:
+
+1. Change `VERSION` and add a section to [`CHANGELOG.md`](CHANGELOG.md).
+2. Commit, then tag that commit. The tag is `v` plus the version, for example `v0.1.1`.
+3. Push the tag. The release workflow checks that the tag matches `VERSION` and publishes a GitHub release.
+
+Consumers install that tag with the `pip install "flashtrie @ git+...@vX.Y.Z"` command above. There is no network service to call.
+
+### Build the tools and benchmarks
+
+`pip install` builds the library only. The command-line tools and the paper
+benchmarks still use CMake:
+
+```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ```
 
-This produces the `flashtrie` Python extension in `build/tools/` alongside the
-command-line tools.
+This writes the extension to `build/tools/_core*.so` and the command-line
+tools next to it. The benchmark scripts load that extension automatically.
 
 By default the build targets compute capability 8.0 (Ampere). Override it for
 your GPU:
@@ -137,24 +185,19 @@ managed-memory allocations during trie construction.
 ## Quick start
 
 ```python
-import sys
-sys.path.insert(0, "build/tools")
 import flashtrie
 
-# Build a constraint library from tokenized identifiers.
 trie = flashtrie.Trie()
 trie.build([[10, 25, 3], [10, 25, 91], [7, 40]])
-trie.save("trie.bin")
-
-print(trie.num_keys(), trie.total_size())
-
-# Allocate GPU workspace once, then reuse it across requests.
 trie.init_tbs_gpu(max_batch_size=1)
 
-# Per decoding step, supply the model's top-K token proposals and
-# log-probabilities. Rows must be sorted by token id.
-sequences, scores, lengths = flashtrie.bs_tbs_gpu(
-    trie, batch_size, beams, topk_id, topk_logp,
+# One row per decoding step. Each row is sorted by token id.
+beams = [8, 8, 8]
+topk_id = [[7, 10, 99], [25, 40, 99], [3, 91, 99]]
+topk_logp = [[-0.1, -0.2, -8.0], [-0.1, -0.2, -8.0], [-0.1, -0.2, -8.0]]
+
+sequences, scores, elapsed_ms, _phases = flashtrie.bs_tbs_gpu(
+    trie, 1, [beams], [topk_id], [topk_logp],
     token_logp_threshold=-10.0,
     sents_logp_threshold=-40.0,
     length_norm=5.0,
@@ -163,13 +206,15 @@ sequences, scores, lengths = flashtrie.bs_tbs_gpu(
 ```
 
 `flashtrie.tbs(...)` runs the same search for a single request and takes a
-`use_gpu` flag, so it doubles as the CPU reference path.
+`use_gpu` flag, so it doubles as the CPU reference path. The runnable copy of
+this example is [`examples/quickstart.py`](examples/quickstart.py).
 
 ## Examples and benchmarks
 
-[`examples/`](examples/) contains runnable benchmarks that reproduce the
-paper's measurements, plus a generator so everything runs without proprietary
-data:
+[`examples/quickstart.py`](examples/quickstart.py) is the adoption example:
+install the package, import it, and run one search. The other scripts in
+[`examples/`](examples/) reproduce the paper's measurements, plus a generator
+so those runs need no proprietary data:
 
 ```bash
 cd examples

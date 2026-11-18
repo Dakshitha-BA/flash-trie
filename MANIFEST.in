@@ -1,0 +1,14 @@
+include VERSION CHANGELOG.md README.md COPYING.md LICENSE-MIT AUTHORS
+include CMakeLists.txt pyproject.toml setup.py
+recursive-include include *
+recursive-include lib *
+recursive-include tools *
+recursive-include python *
+recursive-include examples *.py
+recursive-include examples *.md
+global-exclude *.pyc
+global-exclude __pycache__
+prune build
+prune dist
+prune examples/data
+prune examples/out

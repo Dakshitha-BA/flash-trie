@@ -3,21 +3,37 @@
 Runnable examples that reproduce the latency measurements reported in the
 FlashTrie paper: constrained beam search over a GPU-resident succinct trie.
 
-Everything here talks to the compiled `flashtrie` extension through one small
-wrapper, [`flashtrie_bench.py`](flashtrie_bench.py), which uses only the API
-the C++/CUDA sources in this repository actually export.
+[`quickstart.py`](quickstart.py) imports the installed package. The measurement
+scripts talk to the same API through [`flashtrie_bench.py`](flashtrie_bench.py).
 
 | File | Purpose |
 | --- | --- |
+| [`quickstart.py`](quickstart.py) | Import the installed package and run one search |
 | [`flashtrie_bench.py`](flashtrie_bench.py) | Shared wrapper: extension loading, TSV parsing, batching, the searcher, latency statistics |
 | [`make_example_data.py`](make_example_data.py) | Builds a synthetic trie and proposal files so the examples run with no proprietary data |
 | [`run_trie_search.py`](run_trie_search.py) | Single-configuration benchmark |
 | [`run_trie_search_BWsweep.py`](run_trie_search_BWsweep.py) | Beam-width sweep |
 | [`run_trie_search_BSsweep.py`](run_trie_search_BSsweep.py) | Batch-size sweep |
 
+## Import the library
+
+This is the path other teams should use. It does not use the benchmark
+scripts or a `sys.path` edit.
+
+```bash
+# from the repository root
+pip install .
+python examples/quickstart.py
+```
+
+`quickstart.py` prints `flashtrie.__version__`, builds a three-key trie, and
+runs one search. GPU workspace allocation is tried first; if it fails, the
+script uses the CPU reference path.
+
 ## Quick start
 
-Build the extension first (see the [top-level README](../README.md)), then:
+Build the extension first if you are reproducing the paper measurements (see
+the [top-level README](../README.md)), then:
 
 ```bash
 cd examples
@@ -40,8 +56,9 @@ python run_trie_search_BWsweep.py \
     --output-dir out/bw
 ```
 
-The scripts locate the extension automatically in `../build/tools`. Override
-with `FLASHTRIE_BUILD_DIR` if you built somewhere else.
+The benchmark scripts prefer the extension in `../build/tools` (`_core*.so`).
+Override with `FLASHTRIE_BUILD_DIR` if you built somewhere else. If that
+extension is absent, they import the installed `flashtrie` package.
 
 ## Measurement setup
 

@@ -9,6 +9,16 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 project(marisa-trie LANGUAGES CXX CUDA)
 
+file(READ "${CMAKE_SOURCE_DIR}/VERSION" FLASHTRIE_VERSION)
+string(STRIP "${FLASHTRIE_VERSION}" FLASHTRIE_VERSION)
+message(STATUS "FlashTrie version: ${FLASHTRIE_VERSION}")
+
+# Prefer the toolkit CMake found. The hardcoded /usr/local/cuda include in
+# subdirectories remains as a fallback for the existing developer build.
+if(CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES)
+  include_directories(${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES})
+endif()
+
 # Optional: record a per-phase GPU timing breakdown (beam expansion, child
 # validation, top-B selection, grid-sync/launch overhead) in the beam search
 # kernel. Enable with: cmake -DTBS_PROFILE=ON ..

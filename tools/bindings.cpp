@@ -21,7 +21,14 @@ void build_from_list(
   trie.build(keyset, config_flags);
 }
 
-PYBIND11_MODULE(flashtrie, m) {
+#ifndef FLASHTRIE_VERSION
+#define FLASHTRIE_VERSION "unknown"
+#endif
+
+PYBIND11_MODULE(_core, m) {
+  m.attr("__version__") = FLASHTRIE_VERSION;
+  m.doc() = "FlashTrie GPU-accelerated constrained beam search";
+
   typedef marisa::Trie Trie;
 
   py::class_<Trie>(m, "Trie")
